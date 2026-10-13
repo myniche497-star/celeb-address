@@ -81,7 +81,7 @@ export default async function handler(req, res) {
         jwt.verify(token, JWT_SECRET);
 
         // ==========================================
-        // METHOD: GET (RETRIEVE ADMIN SETTINGS DATA)
+        // METHOD: GET (RETRIEVE ADMIN SETTINGS & CARDS)
         // ==========================================
         if (req.method === "GET") {
             const signature = req.query.signature || req.headers["x-setting-target"];
@@ -90,6 +90,7 @@ export default async function handler(req, res) {
                 return res.status(400).json({ success: false, error: "Required workspace signature context missing." });
             }
 
+            // Fetch admin credentials
             const { data: admin, error: dbError } = await supabase
                 .from("admin")
                 .select("id, email, address, password, signature")
@@ -100,20 +101,67 @@ export default async function handler(req, res) {
                 return res.status(404).json({ success: false, error: dbError?.message || "Admin settings record not found." });
             }
 
+            // Fetch card tier texts by signature
+            const { data: cardRecord } = await supabase
+                .from("cards")
+                .select("id, silver, gold, platinum, signature")
+                .eq("signature", signature)
+                .maybeSingle();
+
             return res.status(200).json({
                 success: true,
-                admin
+                admin,
+                cards: cardRecord || { silver: "", gold: "", platinum: "", signature }
             });
         }
 
         // ==========================================
-        // METHOD: POST (OTP ACTIONS AND PROFILE UPDATE)
+        // METHOD: POST (OTP, PROFILE UPDATE, AND CARDS UPDATE)
         // ==========================================
         if (req.method === "POST") {
-            const { action, signature, email, otp, address, password } = req.body;
+            const { action, signature, email, otp, address, password, silver, gold, platinum } = req.body;
 
             if (!signature) {
                 return res.status(400).json({ success: false, error: "Admin signature is required." });
+            }
+
+            // ACTION: UPDATE CARDS CONFIGURATION
+            if (action === "update_cards") {
+                const { data: existingCard } = await supabase
+                    .from("cards")
+                    .select("id")
+                    .eq("signature", signature)
+                    .maybeSingle();
+
+                let cardResult;
+                let cardError;
+
+                if (existingCard) {
+                    const { data, error } = await supabase
+                        .from("cards")
+                        .update({ silver, gold, platinum })
+                        .eq("signature", signature)
+                        .select()
+                        .single();
+                    cardResult = data;
+                    cardError = error;
+                } else {
+                    const { data, error } = await supabase
+                        .from("cards")
+                        .insert([{ signature, silver, gold, platinum }])
+                        .select()
+                        .single();
+                    cardResult = data;
+                    cardError = error;
+                }
+
+                if (cardError) throw cardError;
+
+                return res.status(200).json({
+                    success: true,
+                    cards: cardResult,
+                    message: "Membership card tiers updated successfully."
+                });
             }
 
             // ACTION 1: DISPATCH ADMIN OTP

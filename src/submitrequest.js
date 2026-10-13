@@ -37,9 +37,10 @@ async function getAdminConfig(signature) {
 }
 
 // Helper: Send email notification to admin
-async function notifyAdmin({ requestType, celebName, userName, userEmail, details }) {
+async function notifyAdmin({ requestType, celebName, userName, userEmail, details, signature }) {
     try {
-        const { apiKey, senderEmail, adminEmail } = await getAdminConfig(FRONTEND_SIGNATURE);
+        const sig = signature || FRONTEND_SIGNATURE;
+        const { apiKey, senderEmail, adminEmail } = await getAdminConfig(sig);
         if (!adminEmail || !apiKey) return;
 
         const brevo = new BrevoClient({ apiKey });
@@ -65,14 +66,15 @@ async function notifyAdmin({ requestType, celebName, userName, userEmail, detail
     }
 }
 
-// 1. Check if monetization/services are enabled
+// 1. Check if monetization/services are enabled (filtered by signature)
 router.get('/status', async (req, res) => {
     try {
+        const signature = req.query.signature || FRONTEND_SIGNATURE;
         const { data, error } = await supabase
             .from('full_version')
             .select('paid')
-            .eq('id', 1)
-            .single();
+            .eq('signature', signature)
+            .maybeSingle();
 
         if (error) throw error;
         res.json({ success: true, paid: data?.paid ?? false });
@@ -81,14 +83,15 @@ router.get('/status', async (req, res) => {
     }
 });
 
-// 2. Fetch Card Tiers for Membership Modal
+// 2. Fetch Card Tiers for Membership Modal (filtered by signature)
 router.get('/cards', async (req, res) => {
     try {
+        const signature = req.query.signature || FRONTEND_SIGNATURE;
         const { data, error } = await supabase
             .from('cards')
             .select('*')
-            .eq('id', 1)
-            .single();
+            .eq('signature', signature)
+            .maybeSingle();
 
         if (error) throw error;
         res.json({ success: true, cards: data });
@@ -97,10 +100,11 @@ router.get('/cards', async (req, res) => {
     }
 });
 
-// 3. Submit Request (Bookings, Meet & Greets, Memberships, Support)
+// 3. Submit Request (Bookings, Meet & Greets, Memberships, Support with signature)
 router.post('/submit', async (req, res) => {
     try {
-        const { userId, celebName, type, payload } = req.body;
+        const { userId, celebName, type, payload, signature } = req.body;
+        const activeSignature = signature || FRONTEND_SIGNATURE;
 
         if (!userId || !celebName || !type) {
             return res.status(400).json({ success: false, error: 'Missing required request parameters' });
@@ -126,7 +130,8 @@ router.post('/submit', async (req, res) => {
                 celeb_name: celebName,
                 event_type: payload.type,
                 event_date: payload.date,
-                description: payload.desc
+                description: payload.desc,
+                signature: activeSignature
             }]);
             insertError = error;
         } else if (type === 'meet') {
@@ -136,7 +141,8 @@ router.post('/submit', async (req, res) => {
                 celeb_name: celebName,
                 session_type: payload.type,
                 session_date: payload.date,
-                reason: payload.desc
+                reason: payload.desc,
+                signature: activeSignature
             }]);
             insertError = error;
         } else if (type === 'membership') {
@@ -144,7 +150,8 @@ router.post('/submit', async (req, res) => {
             const { error } = await supabase.from('memberships').insert([{
                 user_id: userId,
                 celeb_name: celebName,
-                tier_selected: payload.tier
+                tier_selected: payload.tier,
+                signature: activeSignature
             }]);
             insertError = error;
         } else if (type === 'support') {
@@ -152,7 +159,8 @@ router.post('/submit', async (req, res) => {
             const { error } = await supabase.from('celebrity_support').insert([{
                 user_id: userId,
                 celeb_name: celebName,
-                amount: parseFloat(payload.amount)
+                amount: parseFloat(payload.amount),
+                signature: activeSignature
             }]);
             insertError = error;
         } else {
@@ -169,7 +177,8 @@ router.post('/submit', async (req, res) => {
             celebName,
             userName,
             userEmail,
-            details: detailString
+            details: detailString,
+            signature: activeSignature
         });
 
         res.json({ success: true, message: 'Request submitted successfully' });
