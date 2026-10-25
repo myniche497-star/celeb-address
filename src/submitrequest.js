@@ -71,14 +71,15 @@ router.get('/status', async (req, res) => {
     try {
         const signature = req.query.signature || FRONTEND_SIGNATURE;
         const { data, error } = await supabase
-            .from('full_version')
-            .select('paid')
+            .from('admin')
+            .select('admin_subscription')
             .eq('signature', signature)
             .maybeSingle();
 
         if (error) throw error;
-        res.json({ success: true, paid: data?.paid ?? false });
+        res.json({ success: true, paid: data?.admin_subscription ?? false });
     } catch (err) {
+        console.error('Status check error:', err);
         res.status(500).json({ success: false, paid: false });
     }
 });
