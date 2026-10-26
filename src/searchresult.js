@@ -4,7 +4,6 @@ import { createClient } from '@supabase/supabase-js';
 import ws from 'ws';
 
 const router = Router();
-const FRONTEND_SIGNATURE = 'celemanagement';
 
 const supabase = createClient(
     process.env.PUBLIC_SUPABASE_URL,
@@ -15,9 +14,25 @@ const supabase = createClient(
     }
 );
 
-// 1. Profile Authentication Endpoint (Login / Signup loop)
+// Helper: Strictly extract signature from frontend request. Throws an error if missing.
+function getRequestSignature(req) {
+    const signature = (
+        req.query?.signature ||
+        req.body?.signature ||
+        req.headers?.['x-setting-target'] ||
+        req.headers?.['signature']
+    );
+
+    if (!signature || typeof signature !== 'string' || !signature.trim()) {
+        throw new Error('Workspace signature context missing. Value must be provided from the frontend.');
+    }
+    return signature.trim();
+}
+
+// 1. Profile Authentication Endpoint (Login / Signup loop dynamically isolated by signature)
 router.post('/auth', async (req, res) => {
     try {
+        const activeSignature = getRequestSignature(req);
         const { mode, email, password, fullname, country } = req.body;
         const cleanEmail = email?.trim().toLowerCase();
 
@@ -31,7 +46,7 @@ router.post('/auth', async (req, res) => {
                 .select('*')
                 .eq('email', cleanEmail)
                 .eq('password', password)
-                .eq('signature', FRONTEND_SIGNATURE)
+                .eq('signature', activeSignature)
                 .maybeSingle();
 
             if (error || !user) {
@@ -48,6 +63,7 @@ router.post('/auth', async (req, res) => {
                 .from('users')
                 .select('email')
                 .eq('email', cleanEmail)
+                .eq('signature', activeSignature)
                 .maybeSingle();
 
             if (existing) {
@@ -61,7 +77,7 @@ router.post('/auth', async (req, res) => {
                     country,
                     email: cleanEmail,
                     password,
-                    signature: FRONTEND_SIGNATURE,
+                    signature: activeSignature,
                     active: true
                 }])
                 .select()
@@ -74,7 +90,7 @@ router.post('/auth', async (req, res) => {
 
         res.status(400).json({ success: false, error: 'Invalid authentication mode' });
     } catch (err) {
-        console.error('Profile auth error:', err);
+        console.error('Profile auth error:', err.message);
         res.status(500).json({ success: false, error: err.message || 'Internal server error' });
     }
 });
@@ -140,7 +156,7 @@ router.get('/celebrity', async (req, res) => {
             }
         });
     } catch (err) {
-        console.error('Wikipedia API server error:', err);
+        console.error('Wikipedia API server error:', err.message);
         res.status(500).json({ success: false, error: 'Failed to fetch celebrity details' });
     }
 });

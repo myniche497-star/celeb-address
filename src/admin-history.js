@@ -8,7 +8,6 @@ import { getAdminHistoryEmailTemplates } from './admin-history-template.js';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET;
-const FRONTEND_SIGNATURE = 'celemanagement';
 
 const supabase = createClient(
     process.env.PUBLIC_SUPABASE_URL,
@@ -31,7 +30,23 @@ function verifyAdminToken(req, res, next) {
     });
 }
 
-// Helper: Fetch admin email and Brevo settings based on signature (matching submitrequest.js)
+// Helper: Strictly extract signature from frontend request. Throws an error if missing.
+function getRequestSignature(req) {
+    const signature = (
+        req.query?.signature ||
+        req.body?.signature ||
+        req.headers?.['x-setting-target'] ||
+        req.headers?.['signature'] ||
+        req.admin?.signature
+    );
+
+    if (!signature || typeof signature !== 'string' || !signature.trim()) {
+        throw new Error('Workspace signature context missing. Value must be provided from the frontend.');
+    }
+    return signature.trim();
+}
+
+// Helper: Fetch admin email and Brevo settings based strictly on the provided signature
 async function getAdminConfig(signature) {
     const { data: adminRecord, error } = await supabase
         .from('admin')
@@ -40,7 +55,7 @@ async function getAdminConfig(signature) {
         .maybeSingle();
 
     if (error || !adminRecord) {
-        throw new Error('Admin configuration not found for signature.');
+        throw new Error(`Admin configuration not found for signature: "${signature}".`);
     }
 
     return {
@@ -84,7 +99,7 @@ router.put('/history/:tableName/:recordId', verifyAdminToken, async (req, res) =
 
         const idColumn = tableName === 'memberships' ? 'id_numeric' : 'id';
 
-        // Fetch existing record to get user_id (matching submitrequest.js pattern)
+        // Fetch existing record to get user_id
         const { data: recordRecord, error: fetchErr } = await supabase
             .from(tableName)
             .select('*')
@@ -111,7 +126,8 @@ router.put('/history/:tableName/:recordId', verifyAdminToken, async (req, res) =
                     .single();
 
                 if (userRecord?.email) {
-                    const { apiKey, senderEmail } = await getAdminConfig(FRONTEND_SIGNATURE);
+                    const activeSignature = getRequestSignature(req);
+                    const { apiKey, senderEmail } = await getAdminConfig(activeSignature);
                     if (apiKey && senderEmail) {
                         const platformName = 'Celeb-Net';
                         const { subject, plainTextBody, htmlEmailTemplate } = getAdminHistoryEmailTemplates({

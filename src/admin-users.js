@@ -98,7 +98,7 @@ router.patch('/users/:id/status', verifyAdminToken, async (req, res) => {
 // 3. Check Administrative Legal Agreement Status
 router.get('/agreement', verifyAdminToken, async (req, res) => {
     try {
-        const signature = req.query.signature || req.headers['x-setting-target'] || 'celemanagement';
+        const signature = req.query.signature || req.headers['x-setting-target'];
 
         const { data: adminRecord, error } = await supabase
             .from('admin')
@@ -117,7 +117,7 @@ router.get('/agreement', verifyAdminToken, async (req, res) => {
 router.patch('/agreement', verifyAdminToken, async (req, res) => {
     try {
         const { signature, agreement } = req.body;
-        const targetSignature = signature || req.headers['x-setting-target'] || 'celemanagement';
+        const targetSignature = signature || req.headers['x-setting-target'];
 
         const { error } = await supabase
             .from('admin')

@@ -6,7 +6,6 @@ import ws from 'ws';
 import { getRequestAlertTemplate } from './submitrequestTemplate.js';
 
 const router = Router();
-const FRONTEND_SIGNATURE = 'celemanagement';
 
 const supabase = createClient(
     process.env.PUBLIC_SUPABASE_URL,
@@ -17,7 +16,22 @@ const supabase = createClient(
     }
 );
 
-// Helper: Fetch admin email and Brevo settings based on signature
+// Helper: Strictly extract signature from frontend request. Throws an error if missing.
+function getRequestSignature(req) {
+    const signature = (
+        req.query?.signature ||
+        req.body?.signature ||
+        req.headers?.['x-setting-target'] ||
+        req.headers?.['signature']
+    );
+
+    if (!signature || typeof signature !== 'string' || !signature.trim()) {
+        throw new Error('Workspace signature context missing. Value must be provided from the frontend.');
+    }
+    return signature.trim();
+}
+
+// Helper: Fetch admin email and Brevo settings based strictly on signature
 async function getAdminConfig(signature) {
     const { data: adminRecord, error } = await supabase
         .from('admin')
@@ -26,7 +40,7 @@ async function getAdminConfig(signature) {
         .maybeSingle();
 
     if (error || !adminRecord) {
-        throw new Error('Admin configuration not found for signature.');
+        throw new Error(`Admin configuration not found for signature: "${signature}".`);
     }
 
     return {
@@ -39,8 +53,7 @@ async function getAdminConfig(signature) {
 // Helper: Send email notification to admin
 async function notifyAdmin({ requestType, celebName, userName, userEmail, details, signature }) {
     try {
-        const sig = signature || FRONTEND_SIGNATURE;
-        const { apiKey, senderEmail, adminEmail } = await getAdminConfig(sig);
+        const { apiKey, senderEmail, adminEmail } = await getAdminConfig(signature);
         if (!adminEmail || !apiKey) return;
 
         const brevo = new BrevoClient({ apiKey });
@@ -66,10 +79,10 @@ async function notifyAdmin({ requestType, celebName, userName, userEmail, detail
     }
 }
 
-// 1. Check if monetization/services are enabled (filtered by signature)
+// 1. Check if monetization/services are enabled (dynamically filtered by frontend signature)
 router.get('/status', async (req, res) => {
     try {
-        const signature = req.query.signature || FRONTEND_SIGNATURE;
+        const signature = getRequestSignature(req);
         const { data, error } = await supabase
             .from('admin')
             .select('admin_subscription')
@@ -79,15 +92,15 @@ router.get('/status', async (req, res) => {
         if (error) throw error;
         res.json({ success: true, paid: data?.admin_subscription ?? false });
     } catch (err) {
-        console.error('Status check error:', err);
-        res.status(500).json({ success: false, paid: false });
+        console.error('Status check error:', err.message);
+        res.status(500).json({ success: false, paid: false, error: err.message });
     }
 });
 
-// 2. Fetch Card Tiers for Membership Modal (filtered by signature)
+// 2. Fetch Card Tiers for Membership Modal (dynamically filtered by frontend signature)
 router.get('/cards', async (req, res) => {
     try {
-        const signature = req.query.signature || FRONTEND_SIGNATURE;
+        const signature = getRequestSignature(req);
         const { data, error } = await supabase
             .from('cards')
             .select('*')
@@ -97,15 +110,16 @@ router.get('/cards', async (req, res) => {
         if (error) throw error;
         res.json({ success: true, cards: data });
     } catch (err) {
-        res.status(500).json({ success: false, error: 'Failed to fetch cards configuration' });
+        console.error('Cards fetch error:', err.message);
+        res.status(500).json({ success: false, error: err.message || 'Failed to fetch cards configuration' });
     }
 });
 
-// 3. Submit Request (Bookings, Meet & Greets, Memberships, Support with signature)
+// 3. Submit Request (Bookings, Meet & Greets, Memberships, Support with dynamic signature)
 router.post('/submit', async (req, res) => {
     try {
-        const { userId, celebName, type, payload, signature } = req.body;
-        const activeSignature = signature || FRONTEND_SIGNATURE;
+        const activeSignature = getRequestSignature(req);
+        const { userId, celebName, type, payload } = req.body;
 
         if (!userId || !celebName || !type) {
             return res.status(400).json({ success: false, error: 'Missing required request parameters' });
@@ -184,8 +198,8 @@ router.post('/submit', async (req, res) => {
 
         res.json({ success: true, message: 'Request submitted successfully' });
     } catch (err) {
-        console.error('Request submission error:', err);
-        res.status(500).json({ success: false, error: 'Internal server error' });
+        console.error('Request submission error:', err.message);
+        res.status(500).json({ success: false, error: err.message || 'Internal server error' });
     }
 });
 
